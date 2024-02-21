@@ -74,3 +74,85 @@ val_ds = TensorDataset(*[torch.Tensor(t).to(device) for t in [x_valid, y_valid]]
 
 trn_dl = DataLoader(dataset=trn_ds, batch_size=32, shuffle=True)
 val_dl = DataLoader(dataset=val_ds, batch_size=32, shuffle=False)
+
+#%%
+def build_model():
+    return nn.Sequential(
+                        nn.Linear(in_features=4096, out_features=1024),
+                        nn.ReLU(inplace=True),
+                        nn.BatchNorm1d(num_features=1024),
+                        nn.Dropout(p=0.8),
+                        nn.Linear(in_features=1024, out_features=512),
+                        nn.ReLU(inplace=True),
+                        nn.BatchNorm1d(num_features=512),
+                        nn.Dropout(p=0.8),
+                        nn.Linear(in_features=512, out_features=256),
+                        nn.ReLU(inplace=True),
+                        nn.BatchNorm1d(num_features=256),
+                        nn.Dropout(p=0.8),
+                        nn.Linear(in_features=256, out_features=300),
+                    )
+    
+    #%%  define train func
+def train_batch(model, data, optimizer, criterion):
+    model.train()
+    ims, labels = data
+    _preds = model(ims)
+    optimizer.zero_grad()
+    loss = criterion(_preds, labels)
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+
+@torch.no_grad()
+def validate_batch(model, data, criterion):
+    model.eval()
+    ims, labels = data
+    _preds = model(ims)
+    loss = criterion(_preds, labels)
+    return loss.item()
+
+#%% train the model
+model = build_model().to(device)
+criterion = nn.MSELoss()
+optimizer = optim.Adam(params=model.parameters(), lr=1e-3)
+n_epochs = 60
+
+log = Report(n_epochs)
+for ex in range(n_epochs):
+    N = len(trn_dl)
+    for bx, data in enumerate(trn_dl):
+        loss = train_batch(model, data, optimizer, criterion)
+        log.record(ex+(bx+1)/N, trn_loss=loss, end="\r")
+        
+    N = len(val_dl)
+    for bx, data in enumerate(val_dl):
+        loss = validate_batch(model, data, criterion)
+        log.record(ex+(bx+1)/N, val_loss=loss, end="\r")
+        
+    if not (ex+1)%10: log.report_avgs(ex+1)
+    
+log.plot_epochs(log=True)
+
+#%% predict on images that contain zero-shot classes
+pred_zsl = model(torch.Tensor(x_zsl).to(device)).cpu().detach().numpy()
+class_vectors = sorted(np.load(WORD2VECPATH, allow_pickle=True), key=lambda x: x[0])
+classnames, vectors = zip(*class_vectors)
+classnames = list(classnames)
+vectors = np.array(vectors)
+
+#%% 
+"""
+Calculate the distance between each predicted vector and the vector
+corresponding to the available classes and measure the number of zero-shot 
+classes present in the top five predictions:
+"""
+
+dists = (pred_zsl[None] - vectors[:,None])
+dists = (dists**2).sum(-1).T
+best_classes = []
+
+for item in dists:
+    best_classes.append([classnames[j] for j in np.argsort(item)[:5]])
+    
+np.mean([i in j for i,j in zip(zero_shot_clss, best_classes)])
