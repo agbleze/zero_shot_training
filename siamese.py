@@ -92,7 +92,18 @@ class SiameseNetwork(nn.Module):
         return output1, output2
     
 
-
+#%%
+class ContrastiveLoss(torch.nn.Module):
+    def __init__(self, margin=2):
+        super(self, ContrastiveLoss).__init__()
+        self.margin = margin
+        
+    def forward(self, output1, output2, label):
+        euclidean_distance = F.pairwise_distance(x1=output1, x2=output2, keepdim=True)
+        loss_contrastive = torch.mean(input=(1-label) * torch.pow(input=euclidean_distance, exponent=2) + (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
+        acc = ((euclidean_distance > 0.6)==label).float().mean()
+        return loss_contrastive, acc
+        
 
 
 
