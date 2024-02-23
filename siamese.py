@@ -8,6 +8,7 @@ from torch_snippets import *
 #!unzip face-detection.zip
 
 #%%
+import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 #%% define the dataset class
@@ -57,8 +58,9 @@ val_tfms = transforms.Compose([transforms.ToPILImage(), transforms.Resize(size=(
                                transforms.Normalize(mean=(0.5), std=(0.5))
                                ])
 
-trn_ds = SiameseNetworkDataset(folder=".data/faces/training/", transform=trn_tfms)
-val_ds = SiameseNetworkDataset(folder="./data/faces/testing/", transform=val_tfms)
+#%%
+trn_ds = SiameseNetworkDataset(folder="face-detection/data/faces/training/", transform=trn_tfms)
+val_ds = SiameseNetworkDataset(folder="face-detection/data/faces/testing/", transform=val_tfms)
 
 trn_dl = DataLoader(dataset=trn_ds, shuffle=True, batch_size=64)
 val_dl = DataLoader(dataset=val_ds, shuffle=False, batch_size=64)
@@ -95,7 +97,7 @@ class SiameseNetwork(nn.Module):
 #%%
 class ContrastiveLoss(torch.nn.Module):
     def __init__(self, margin=2):
-        super(self, ContrastiveLoss).__init__()
+        super(ContrastiveLoss, self).__init__()
         self.margin = margin
         
     def forward(self, output1, output2, label):
@@ -103,7 +105,57 @@ class ContrastiveLoss(torch.nn.Module):
         loss_contrastive = torch.mean(input=(1-label) * torch.pow(input=euclidean_distance, exponent=2) + (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
         acc = ((euclidean_distance > 0.6)==label).float().mean()
         return loss_contrastive, acc
+
+
+#%%  define training func
+def train_batch(model, data, optimizer, criterion):
+    imgsA, imgsB, labels = [t.to(device) for t in data]   
+    optimizer.zero_grad()
+    codesA, codesB = model(imgsA, imgsB)  
+    loss, acc = criterion(codesA, codesB, labels)
+    loss.backward()
+    optimizer.step()
+    return loss.item(), acc.item()   
+
+
+@torch.no_grad()
+def validate_batch(model, data, criterion):
+    imgsA, imgsB, labels = [t.to(device) for t in data]
+    codesA, codesB = model(imgsA, imgsB)
+    loss, acc = criterion(codesA, codesB)
+    return loss.item(), acc.item()
+
+
+#%% define model, loss, optimizer
+model = SiameseNetwork().to(device)
+criterion = ContrastiveLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+#%% train model
+n_epochs = 200
+log = Report(n_epochs)
+
+for epoch in range(n_epochs):
+    N = len(trn_dl)
+    for i, data in enumerate(trn_dl):
+        loss, acc = train_batch(model=model, data=data, optimizer=optimizer, criterion=criterion)
+        log.record(epoch+(1+i)/N, trn_loss=loss, trn_acc=acc, end="\r")
         
+    N = len(val_dl)
+    for i, data in enumerate(val_dl):
+        loss, acc = validate_batch(model=model, data=data, criterion=criterion)
+        log.record(epoch+(1+i)/N, val_loss=loss, val_acc=acc,end="\r")
+    if (epoch+1)%20==0: log.report_avgs(epoch+1)
+
+
+#%%    
+log.plot_epochs(["trn_loss", "val_loss"])
+log.plot_epochs(["trn_acc", "val_acc"])
+
+
+#%%        
+        
+
 
 
 
