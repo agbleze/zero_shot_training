@@ -9,6 +9,7 @@ from torch_snippets import *
 
 #%%
 import torch
+from torch_snippets import *
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 #%% define the dataset class
@@ -77,7 +78,7 @@ def convBlock(ni, no):
 class SiameseNetwork(nn.Module):
     def __init__(self):
         super(SiameseNetwork, self).__init__()
-        self.features = nn.Sequential(convBlock(1,4),
+        self.features = nn.Sequential(convBlock(3,4),
                                       convBlock(4,8),
                                       convBlock(8,8),
                                       nn.Flatten(),
@@ -122,7 +123,7 @@ def train_batch(model, data, optimizer, criterion):
 def validate_batch(model, data, criterion):
     imgsA, imgsB, labels = [t.to(device) for t in data]
     codesA, codesB = model(imgsA, imgsB)
-    loss, acc = criterion(codesA, codesB)
+    loss, acc = criterion(codesA, codesB, labels)
     return loss.item(), acc.item()
 
 
@@ -146,6 +147,7 @@ for epoch in range(n_epochs):
         loss, acc = validate_batch(model=model, data=data, criterion=criterion)
         log.record(epoch+(1+i)/N, val_loss=loss, val_acc=acc,end="\r")
     if (epoch+1)%20==0: log.report_avgs(epoch+1)
+    if epoch==10: optimizer = optim.Adam(model.parameters, lr=0.0005)
 
 
 #%%    
